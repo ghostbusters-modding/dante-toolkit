@@ -1,0 +1,20 @@
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# test / tooling caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+
+# local working files.  The shipped .dante scripts are game content: extract them
+# where you like, but they do not belong in this repository.
+out/
+*.dante
+*.s
+local/
