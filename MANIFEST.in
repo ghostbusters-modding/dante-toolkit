@@ -1,0 +1,5 @@
+# The sdist ships a runnable test suite: conftest.py holds every fixture and
+# tests/data holds the .dn sources the reproduction and link tests compile.
+include LICENSE
+recursive-include tests *.py *.dn
+recursive-include docs *.md

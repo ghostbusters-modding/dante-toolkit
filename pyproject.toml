@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dante-toolkit"
+description = "Compiler, decompiler, assembler, linker and headless VM for the Dante scripts of Ghostbusters: The Video Game Remastered"
+readme = "README.md"
+license = "GPL-2.0-only"
+license-files = ["LICENSE"]
+authors = [{ name = "Colin Sullivan" }]
+requires-python = ">=3.9"
+dynamic = ["version"]
+keywords = ["ghostbusters", "dante", "modding", "decompiler", "reverse-engineering"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Compilers",
+    "Topic :: Software Development :: Disassemblers",
+    "Topic :: Games/Entertainment",
+]
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.scripts]
+dante = "dante.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+dante = ["data/*.json"]
+
+[tool.setuptools.dynamic]
+version = { attr = "dante.__version__" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]   # so a bare `pytest` works in a checkout, without installing
+addopts = "-q --strict-markers"
+markers = ["corpus: needs the shipped .dante corpus (--corpus / $DANTE_CORPUS)"]
