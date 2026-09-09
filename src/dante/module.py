@@ -110,7 +110,7 @@ def bitsf(v):
 
 # ----------------------------------------------------------------------------
 # DYNCAST class ids: the engine's own hash of the class name, case-folded, with
-# only letters and digits participating.  See docs/dante_vm.md "Class ids".
+# only letters and digits participating.
 def classid(name):
     h = 0
     for ch in name:
@@ -558,7 +558,6 @@ def fxjoin(fixes):
 
 # ----------------------------------------------------------------------------
 # Assembly source (.s): a complete, re-assemblable rendering of a module.
-# docs/dante_format.md has the directive and operand syntax.
 ASM_HEADER = "; Dante assembly -- dante disasm --asm / dante asm"
 
 
