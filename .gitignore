@@ -15,6 +15,7 @@ venv/
 # local working files.  The shipped .dante scripts are game content: extract them
 # where you like, but they do not belong in this repository.
 out/
+scripts/
 *.dante
 *.s
 local/
