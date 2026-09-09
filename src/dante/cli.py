@@ -13,8 +13,7 @@ def build_parser():
     ap = argparse.ArgumentParser(
         prog="dante",
         description="Dante script toolchain for Ghostbusters: The Video Game Remastered.",
-        epilog="docs/dante_vm.md (machine), docs/dante_format.md (container), "
-               "docs/dante_lang.md (language), docs/dante_cookbook.md (recipes).")
+        epilog="See docs/dante_lang.md (language), docs/dante_cookbook.md (recipes).")
     ap.add_argument("--version", action="version", version="dante %s" % __version__)
     sub = ap.add_subparsers(dest="cmd", required=True, metavar="<command>")
     module.register(sub)
