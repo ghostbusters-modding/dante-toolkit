@@ -1,0 +1,23 @@
+// Reproduction of world/hotel1a.dante's `void spawnFlierKitchSmall(@CSpawn)`.
+module hotel1a;
+
+extern @CGhostbuster hero;
+extern CActorGroup g_FlierKitchSmall;
+extern "void FlierKitchSmall_onDeath(@CCharacter)";
+
+void spawnFlierKitchSmall(@CSpawn sp)
+{
+    SSpawnInfo info;
+    info.citFilename = "flyer_small\\Zoomer_fish.cit";
+    info.classTypeName = "CFlyerSmall";
+    info.variantName = "random";
+
+    @CFlyerSmall flyer = (@CFlyerSmall) sp.spawnCharacter(info);
+    if (flyer == null) {
+        debugPrint("Error. FlyerSmall spawn NULL.");
+        return;
+    }
+    flyer.setVictimUponSpawn(hero);
+    flyer.setDeathEvent(FlierKitchSmall_onDeath);
+    g_FlierKitchSmall.add(flyer);
+}

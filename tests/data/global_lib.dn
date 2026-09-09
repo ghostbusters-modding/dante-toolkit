@@ -1,0 +1,66 @@
+// Reproductions of shipped world/global.dante functions.
+// Compare against:  python3 tools/dante.py disasm world/global.dante --func absInt
+module global;
+
+int absInt(int v)
+{
+    if (v > 0)
+        return v;
+    else
+        return -v;
+}
+
+Vector getVector(float x, float y, float z)
+{
+    Vector v;
+    v.x = x;
+    v.y = y;
+    v.z = z;
+    return v;
+}
+
+bool isActorGroupDead(@CActorGroup grp)
+{
+    for (int i = 0; i < grp.N(); i += 1) {
+        @CCharacter c = (@CCharacter) grp.get(i);
+        if (c != null && c.getHitPointsPct() > 0.0)
+            return false;
+    }
+    return true;
+}
+
+// ternary: both arms store straight into the return slot; the comparison's reserved
+// slot holds the SUBF and pushes the ceil() block one slot up
+float round(float f)
+{
+    float f1 = floor(f);
+    return f - f1 < 0.5 ? f1 : ceil(f);
+}
+
+// compound assignment through a pointer: one materialisation of gTimeSlice per statement
+extern @float gTimeSlice;
+void wait(float f)
+{
+    while (f > *gTimeSlice) {
+        f -= *gTimeSlice;
+        idle();
+    }
+    *gTimeSlice -= f;
+}
+
+// nested call blocks: the inner get() block starts 8 past the enable() block
+void enableActorGroup(@CActorGroup actorGroup, bool b)
+{
+    int n = actorGroup.N();
+    for (int i = 0; i < n; i += 1)
+        actorGroup.get(i).enable(b);
+}
+
+// String temporaries: STRNEW'd pre-order, freed after their consumer (deferred to the
+// call's cleanup when the consumer wrote into the argument slot)
+void debugPrintGroup(@CActorGroup actorGroup)
+{
+    int n = actorGroup.N();
+    for (int i = 0; i < n; i += 1)
+        debugPrint("member" + toString(i) + ": " + actorGroup.get(i).getName());
+}

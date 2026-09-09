@@ -1,0 +1,7 @@
+// A tiny patch used by run.py to prove `dante.py link` relocates a whole module.
+module probe;
+
+void immortal_probe()
+{
+    debugPrint("probe");
+}
