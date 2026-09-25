@@ -170,6 +170,10 @@ A label is **function-scoped** (not block-scoped): it may be defined in any bloc
 * conversions: `toInt(f)` `FTOI`, `toFloat(i)` `ITOF`, `toString(x)` `ITOS/FTOS/BTOS/VTOS`,
   `dot(a, b)` `DOT`
 
+### Member access through parameters
+
+A class member read through an `@CFoo` parameter or local compiles to mode-7 with a 16-bit `M` fixup that the loader resolves against the live engine registry at run time. Every member faults the VM there except `CDialogDatabaseEntry::tag` and `CSpawn::lastActorSpawned`, the two members the shipped corpus proves safe at that addressing mode. `dante compile` refuses any other member with an error naming it. Read it on a global `extern` instead, which compiles to the safe mode-5 `D`+`M` form. `--allow-indirect-members` turns the refusal back into a warning for experiments.
+
 ### What the language does **not** have
 
 No `switch`, no arrays or indexing, no pointer arithmetic, no user-defined struct *values* beyond declaring an engine layout, no bitwise or unsigned operators (the VM has none), no user-defined operator overloading, no varargs, no recursion guard, and no type inference (`var`). Implicit conversion is limited to `int` literal → `float` in a float context and `int` → `float` (`ITOF`) when mixing in arithmetic or a comparison.

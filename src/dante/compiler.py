@@ -1057,10 +1057,11 @@ NEGATE = {"<": ">=", ">=": "<", ">": "<=", "<=": ">", "==": "!=", "!=": "=="}
 
 
 class Compiler:
-    def __init__(self, db, types, module="mod"):
+    def __init__(self, db, types, module="mod", allow_indirect_members=False):
         self.db = db
         self.types = types
         self.module = module
+        self.allow_indirect_members = allow_indirect_members
         self.strings = {}          # text -> data offset
         self.strorder = []
         self.globals = {}          # name -> (Type, symbol text, own?)
@@ -1330,7 +1331,8 @@ class Compiler:
             end = Label("ENDTRY")
             f.code.append(Instr(NAMEOP["TRY"], [Operand(2, (0,), label=catch)]))
             self.gen_stmt(f, s.body)
-            f.emit("ENDTRY", Operand(2, (4,)))
+            # the VM checks ENDTRY's handler against the one TRY pushed (dante.cpp 0xd40)
+            f.code.append(Instr(NAMEOP["ENDTRY"], [Operand(2, (0,), label=catch)]))
             if falls_through(s.body):
                 f.goto(end)
             f.bind(catch)
@@ -1504,6 +1506,14 @@ class Compiler:
                 # struct members through a pointer: the offset is baked (the
                 # ASSUMPTIONS line guards it); class members get an M fixup
                 return Place(mt, 7, (slot & 0xFFFF, off & 0xFFFF))
+            if (inner, e.name) not in DV.PROVEN_INDIRECT_MEMBERS:
+                # this addressing mode faults the VM for any other member
+                msg = "%s::%s read through a parameter or local; read it on a global extern instead" % (
+                    inner, e.name)
+                if self.allow_indirect_members:
+                    print("dante compile: warning: %s" % msg, file=sys.stderr)
+                else:
+                    err(msg, e)
             return Place(mt, 7, (slot & 0xFFFF, 0), fix16=[("M", text)])
         if bt.kind == "Vector":
             off = {"x": 0, "y": 4, "z": 8}.get(e.name)
@@ -2331,7 +2341,8 @@ def default_symbol_paths():
     return symbols.default_symbol_sources()
 
 
-def compile_source(path, symbols=(), libs=(), module=None, emit_init=True):
+def compile_source(path, symbols=(), libs=(), module=None, emit_init=True,
+                   allow_indirect_members=False):
     types = Types()
     db = SymbolDB(types)
     for kind, p in default_symbol_paths():
@@ -2345,7 +2356,7 @@ def compile_source(path, symbols=(), libs=(), module=None, emit_init=True):
     toks = lex(src)
     decls = Parser(toks, types).parse_module()
     stem = module or os.path.splitext(os.path.basename(path))[0]
-    comp = Compiler(db, types, stem)
+    comp = Compiler(db, types, stem, allow_indirect_members=allow_indirect_members)
     mods = comp.compile(decls, emit_init=emit_init)
     return build_module(comp, mods)
 
@@ -2353,7 +2364,8 @@ def compile_source(path, symbols=(), libs=(), module=None, emit_init=True):
 def cmd_compile(args):
     try:
         d = compile_source(args.source, args.symbols, args.lib, args.module,
-                           emit_init=not args.no_init)
+                           emit_init=not args.no_init,
+                           allow_indirect_members=args.allow_indirect_members)
     except CompileError as ex:
         print("%s: %s" % (args.source, ex), file=sys.stderr)
         return 2
@@ -2385,4 +2397,6 @@ def register(sub):
     a.add_argument("--module", help="module stem (default: the source file's name)")
     a.add_argument("--no-init", action="store_true",
                    help="do not emit __<stem>_init() (for patches linked into an existing module)")
+    a.add_argument("--allow-indirect-members", action="store_true",
+                   help="downgrade the indirect-member-read error to a warning (experiments only)")
     a.set_defaults(fn=cmd_compile)

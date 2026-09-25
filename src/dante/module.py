@@ -30,7 +30,7 @@ OPS = [
     ("BTOS",     "d", "r", "-"),   # 13 "true"/"false"
     ("VTOS",     "d", "r", "-"),   # 14 "{%g, %g, %g}"
     ("LEA",      "d", "a", "-"),   # 15 dest = address of src1
-    ("ENDTRY",   "-", "-", "-"),   # 16 pop the TRY frame (operand ignored)
+    ("ENDTRY",   "j", "-", "-"),   # 16 pop the TRY frame; dest must be the same handler TRY named
     ("ADDI",     "d", "r", "r"),   # 17
     ("ADDF",     "d", "r", "r"),   # 18
     ("ADDV",     "d", "r", "r"),   # 19
@@ -939,16 +939,37 @@ def verify_one(d, quiet=False):
     return errs
 
 
+# The only (class, member) pairs the 21 shipped modules read at this addressing mode.
+PROVEN_INDIRECT_MEMBERS = {("CDialogDatabaseEntry", "tag"), ("CSpawn", "lastActorSpawned")}
+
+
+def indirect_member_warnings(d):
+    """'.16' M fixup sites whose (class, member) isn't corpus-proven safe."""
+    warns = []
+    for k, sym, sites in d.fixups:
+        if k != "M":
+            continue
+        _, _, rest = sym.partition(" ")
+        cls, _, mem = rest.partition("::")
+        if (cls, mem) in PROVEN_INDIRECT_MEMBERS:
+            continue
+        warns += ["%X: indirect member read %s" % (off, sym) for off, bits in sites if bits == 16]
+    return warns
+
+
 def cmd_verify(args):
     bad = 0
     for p in iter_files(args.target):
         d = load(p)
         errs = verify_one(d, quiet=True)
+        warns = indirect_member_warnings(d)
         print("%-24s %6d instrs  %5d fixup sites  %s" % (
             os.path.basename(p), len(d.code), sum(len(s) for _, _, s in d.fixups),
             "OK" if not errs else "%d ERRORS" % len(errs)))
         for e in errs[:10]:
             print("    " + e)
+        for w in warns[:10]:
+            print("    warning: " + w)
         bad += bool(errs)
     return 1 if bad else 0
 
