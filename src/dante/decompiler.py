@@ -1286,6 +1286,21 @@ class Fn:
         free = self.ins[c + 1]
         return free.name == "STRFREE" and free.ops[0].mode == 3 and s16(free.ops[0].words[0]) == slot
 
+    def _ahead_of_siblings(self, i, slot):
+        """Is the value at i passed to a call whose receiver or an earlier argument was
+        filled after it?  Inlining it would reorder the source, so it was a local."""
+        e = self.blocks[self.blk_of[i]][1]
+        u = next((j for j in range(i + 1, e) if slot in self.du[j][1]), None)
+        if u is None or self.ins[u].ops[0].mode != 3 or self.ins[u].name not in ("MOV", "MOVV", "STRCPY"):
+            return False
+        d = s16(self.ins[u].ops[0].words[0])
+        c = next((j for j in range(u + 1, e) if j in self.call and
+                  self.call[j][2] >= 0 and self.call[j][2] <= d < self.call[j][3]), None)
+        if c is None:
+            return False
+        base = self.call[c][2]
+        return any(base <= o < d for j in range(i + 1, u) for o in self.du[j][0])
+
     def classify(self, i, slot):
         """'dead' | 'temp' | 'local' for the definition of `slot` at index i."""
         if slot < 8 or (any(a <= i < e for a, e in self.forced_local.get(slot, ())) and
@@ -1322,6 +1337,8 @@ class Fn:
         live = (slot in self.live_out[k]) and not redefined
         if uses == 0 and not live:
             return "dead"
+        if uses == 1 and not live and i not in self.call and self._ahead_of_siblings(i, slot):
+            return "local"
         if uses == 1 and not live:
             # A call result stored below the temp region is a named local: temporaries
             # always start at locals_end.
