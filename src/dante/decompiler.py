@@ -918,7 +918,7 @@ class Fn:
 
     def _prescan(self):
         """Slots that must be locals: struct locals and component-written Vectors."""
-        self.forced_local = {}          # slot -> first instruction it is a local at
+        self.forced_local = {}          # slot -> [(start, end)] index ranges it is a local in
         self.block_slots = set()
         self.struct_pre = {}
         self.struct_ranges = {}         # slot -> [(ctor index, dtorpop index)]
@@ -996,32 +996,73 @@ class Fn:
             if blocked and not (narrow & {b, b + 4, b + 8}):
                 continue
             if blocked:
-                # Call storage earlier on; the Vector local starts at the first lane
-                # write after the last call covering it.
-                first = None
-                for c, cc in self.call.items():
-                    if cc[2] >= 0 and cc[2] < b + 12 and b < cc[3]:
-                        first = c + 1 if first is None else max(first, c + 1)
-                if first is None:
-                    continue
+                # Between two calls that cover it the slot can hold a Vector local
+                # whose lanes are written one at a time.
                 if any(sb <= b < sb + max(4, st.size)
                        for sb, st in self.struct_pre.items()):
                     continue                 # a struct local, not a Vector
-                if not any(self.ins[i].name in NARROW and
-                           self.ins[i].ops[0].mode == 3 and
-                           s16(self.ins[i].ops[0].words[0]) == b
-                           for i in range(first, self.n)):
-                    continue
-                self.vec_base.add(b)
-                for o in (b, b + 4, b + 8):
-                    self.forced_local[o] = min(self.forced_local.get(o, 1 << 30), first)
+                covers = sorted(c for c, cc in self.call.items()
+                                if cc[2] >= 0 and cc[2] < b + 12 and b < cc[3])
+                gaps = zip([c + 1 for c in covers], covers[1:] + [self.n])
+                hit = False
+                for g0, g1 in gaps:
+                    if not any(self.ins[i].name in NARROW and
+                               self.ins[i].ops[0].mode == 3 and
+                               s16(self.ins[i].ops[0].words[0]) == b
+                               for i in range(g0, g1)):
+                        continue
+                    if not self._used_as_vector(b, g0, g1):
+                        continue             # a float that reuses a Vector arg's slot
+                    if g1 < self.n and not self._defines_vector(b, g0, g1):
+                        continue             # e.g. a call's Vector return being copied out
+                    hit = True
+                    for o in (b, b + 4, b + 8):
+                        self.forced_local.setdefault(o, []).append((g0, g1))
+                if hit:
+                    self.vec_base.add(b)
                 continue
             if narrow & {b, b + 4, b + 8}:
                 self.vec_base.add(b)
                 for o in (b, b + 4, b + 8):
-                    self.forced_local[o] = 0
+                    self.forced_local.setdefault(o, []).append((0, self.n))
             else:
                 self.vec_base.add(b)
+
+    def _defines_vector(self, b, i0, i1):
+        """Is `b` written as a whole Vector in [i0, i1), other than to fill a call?"""
+        return any(self.ins[i].name in ("MOVV", "ADDV", "SUBV", "MULVS", "DIVVS") and
+                   self.ins[i].ops[0].mode == 3 and s16(self.ins[i].ops[0].words[0]) == b and
+                   not self._fills_block(i, b) for i in range(i0, i1))
+
+    def _used_as_vector(self, b, i0, i1):
+        """In [i0, i1), is `b` read or written as a whole Vector?  Lanes alone prove
+        nothing: int handles zeroed in a row look the same."""
+        VEC = ("MOVV", "ADDV", "SUBV", "MULVS", "DIVVS", "DOT", "VTOS",
+               "JEQ_V", "JNE_V", "EQ_V", "NE_V")
+        for i in range(i0, i1):
+            ins = self.ins[i]
+            if ins.name not in VEC:
+                continue
+            for idx in range(3):
+                o = ins.ops[idx]
+                if o.mode != 3 or s16(o.words[0]) != b:
+                    continue
+                dest = idx == 0 and OPS[ins.op][1] == "d"
+                if dest and self._fills_block(i, b):
+                    continue
+                scalar = (idx == 2 and ins.name in ("MULVS", "DIVVS")) or \
+                    (dest and ins.name in ("DOT", "VTOS", "EQ_V", "NE_V"))
+                if not scalar and (dest or not self._reads_call_ret(i, b)):
+                    return True
+        return False
+
+    def _reads_call_ret(self, i, b):
+        """Is the value of `b` read at i a call's return, still in its return slot?"""
+        s0 = self.blocks[self.blk_of[i]][0]
+        for j in range(i - 1, s0 - 1, -1):
+            if b in self.du[j][0]:
+                return j in self.call and self.call[j][4] == b
+        return False
 
     def _wants(self):
         """instruction index -> the type its destination is being filled with."""
@@ -1210,7 +1251,8 @@ class Fn:
 
     def classify(self, i, slot):
         """'dead' | 'temp' | 'local' for the definition of `slot` at index i."""
-        if slot < 8 or i >= self.forced_local.get(slot, 1 << 30) or \
+        if slot < 8 or (any(a <= i < e for a, e in self.forced_local.get(slot, ())) and
+                        not self._fills_block(i, slot)) or \
                 any(s <= i < e for s, e in self.struct_ranges.get(slot, ())):
             return "local"
         # R1: a plain copy into a slot that isn't filling a call block defines a local.
