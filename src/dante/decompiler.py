@@ -1863,6 +1863,9 @@ class Fn:
             slot = s16(o.words[0])
             self._web_sync(slot)
             if self.ret_slot is not None and slot == self.ret_slot:
+                if self._reread(self.cur, slot):
+                    self.pending[slot] = val     # `return !x` stores x, then negates in place
+                    return
                 self._flush(out)
                 out.append(St("raw", "return %s;" % val.txt(0)))
                 self.returned = True
@@ -1884,6 +1887,17 @@ class Fn:
         self._flush(out)
         dst = self.operand(ins, 0)
         out.append(St("raw", "%s = %s;" % (dst.txt(P_ATOM), val.txt(0))))
+
+    def _reread(self, i, slot):
+        """Is `slot` read again in this basic block before it is overwritten?"""
+        e = self.blocks[self.blk_of[i]][1]
+        for j in range(i + 1, e):
+            dd, uu = self.du[j]
+            if slot in uu:
+                return True
+            if slot in dd:
+                return False
+        return False
 
     def names_from_struct(self):
         s = set()
