@@ -2738,7 +2738,13 @@ class Fn:
             return
 
         placed = []         # (target, pos, moved, slot, st, name)
+        # a struct's constructor runs where it is declared, so that never moves
+        pinned = {id(st) for cid, k, st, name in decls
+                  if self.types.parse(st.decl[0]).kind in ("struct", "cls")}
         for cid, k, st, name in decls:
+            if id(st) in pinned:
+                placed.append([cid, k, False, st.slot if st.slot is not None else 0, st, name])
+                continue
             rx = re.compile(r"\b%s\b" % re.escape(name))
             common = None
             for j in range(len(conts)):
@@ -2765,6 +2771,8 @@ class Fn:
         for _round in range(8):
             moved_any = False
             for a in placed:
+                if id(a[4]) in pinned:
+                    continue
                 for b in placed:
                     if a is b or b[3] <= a[3] or b[0] == a[0]:
                         continue
@@ -2793,7 +2801,7 @@ class Fn:
             lim = 1 << 30
             for i in range(len(items) - 1, -1, -1):
                 tg, pos, moved, slot, st, name = items[i]
-                if moved or pos > lim:
+                if id(st) not in pinned and (moved or pos > lim):
                     need[i] = True
                     items[i][1] = pos = min(pos, lim)
                 lim = min(lim, pos)
