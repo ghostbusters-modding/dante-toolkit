@@ -29,6 +29,15 @@ def pytest_addoption(parser):
     parser.addoption("--corpus", action="store", default=None,
                      help="directory holding the shipped world/*.dante modules; pass it "
                           "as --corpus=DIR (default: $DANTE_CORPUS)")
+    parser.addoption("--mod-corpus", action="store", default=None,
+                     help="directory of .dante files our compiler built, for the reverse "
+                          "round trip (default: $DANTE_MOD_CORPUS)")
+
+
+def mod_corpus_dir(config):
+    """Scripts our compiler built, for the reverse round trip, or None."""
+    path = config.getoption("--mod-corpus") or os.environ.get("DANTE_MOD_CORPUS")
+    return path if path and os.path.isdir(path) else None
 
 
 def corpus_dir(config):

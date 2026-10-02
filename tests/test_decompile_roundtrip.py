@@ -1,4 +1,5 @@
 """Round-trip every shipped export through `.dn` and compare the words back."""
+import os
 import re
 import tempfile
 import collections
@@ -7,7 +8,8 @@ import pytest
 
 import dante
 from dante import compiler as DC
-from conftest import MODULES, same_words
+from dante import decompiler as DD
+from conftest import MODULES, same_words, mod_corpus_dir
 
 # Floors, not targets -- measured at 93.1% identical, 99.6% recompile, 20 stubs.
 IDENTICAL_FLOOR = 93.0
@@ -71,6 +73,25 @@ def why_different(shipped, built, proto):
     return "?"
 
 
+def round_trip(stem, m, shipped):
+    """One module's decompile -> recompile result against the original build."""
+    with tempfile.TemporaryDirectory() as td:
+        built, stubbed = build(m, td)
+    row = dict(stem=stem, total=len(m.results), ident=0, rec=0, equiv=0, stub=len(stubbed),
+               compiled=built is not None, init="-", causes=collections.Counter())
+    for r in m.results:
+        if not r.ok or r.proto in stubbed or built is None:
+            continue
+        if same_words(shipped, built, r.proto):
+            row["ident"] += 1
+        else:
+            row["rec"] += 1
+            row["equiv"] += dante.module.equivalent(shipped, built, r.proto)
+            row["causes"][why_different(shipped, built, r.proto)] += 1
+    row["stub"] = row["total"] - row["ident"] - row["rec"]
+    return row, built
+
+
 @pytest.fixture(scope="module")
 def recompiled(decompiled):
     """stem -> one module's round-trip result, computed once."""
@@ -80,19 +101,7 @@ def recompiled(decompiled):
         if stem in cache:
             return cache[stem]
         m, shipped = decompiled(stem)
-        with tempfile.TemporaryDirectory() as td:
-            built, stubbed = build(m, td)
-        row = dict(stem=stem, total=len(m.results), ident=0, rec=0, stub=len(stubbed),
-                   compiled=built is not None, init="-", causes=collections.Counter())
-        for r in m.results:
-            if not r.ok or r.proto in stubbed or built is None:
-                continue
-            if same_words(shipped, built, r.proto):
-                row["ident"] += 1
-            else:
-                row["rec"] += 1
-                row["causes"][why_different(shipped, built, r.proto)] += 1
-        row["stub"] = row["total"] - row["ident"] - row["rec"]
+        row, built = round_trip(stem, m, shipped)
         if m.init_result is not None and built is not None:
             row["init"] = ("identical" if same_words(shipped, built, "void __%s_init()" % m.stem)
                            else "differs")
@@ -116,6 +125,7 @@ def test_corpus_round_trip_rates(corpus_modules, recompiled, report):
     total = sum(r["total"] for r in rows)
     ident = sum(r["ident"] for r in rows)
     rec = sum(r["rec"] for r in rows)
+    equiv = sum(r["equiv"] for r in rows)
     stub = sum(r["stub"] for r in rows)
 
     report("%-16s %5s %5s %5s %5s   %6s  %s"
@@ -128,6 +138,8 @@ def test_corpus_round_trip_rates(corpus_modules, recompiled, report):
            % ("TOTAL", total, ident, rec, stub, 100.0 * ident / max(1, total)))
     report("identical %.1f%%   recompiles %.1f%%   stubbed %.1f%%"
            % (100.0 * ident / total, 100.0 * (ident + rec) / total, 100.0 * stub / total))
+    report("same behaviour %.1f%%   (identical, or equivalent() proves %d more)"
+           % (100.0 * (ident + equiv) / total, equiv))
     causes = collections.Counter()
     for r in rows:
         causes.update(r["causes"])
@@ -138,3 +150,22 @@ def test_corpus_round_trip_rates(corpus_modules, recompiled, report):
     assert 100.0 * ident / total >= IDENTICAL_FLOOR
     assert 100.0 * (ident + rec) / total >= RECOMPILE_FLOOR
     assert stub <= MAX_STUBS
+
+
+def test_mod_corpus_round_trip(request, report):
+    """Scripts our own compiler built (--mod-corpus / $DANTE_MOD_CORPUS): report only."""
+    path = mod_corpus_dir(request.config)
+    if path is None:
+        pytest.skip("no mod corpus: pass --mod-corpus <dir of .dante> or set $DANTE_MOD_CORPUS")
+    rows = []
+    for f in dante.iter_files(path):
+        stem = os.path.basename(f)[:-len(".dante")]
+        row, _ = round_trip(stem, DD.decompile_file(f), dante.load(f))
+        rows.append(row)
+    total = sum(r["total"] for r in rows)
+    same = sum(r["ident"] + r["equiv"] for r in rows)
+    report("mod corpus: %d modules, %d functions, same behaviour %.1f%%, %d stubbed"
+           % (len(rows), total, 100.0 * same / max(1, total), sum(r["stub"] for r in rows)))
+    for r in rows:
+        if r["stub"] or r["rec"] - r["equiv"]:
+            report("  %-20s %3d not proven  %3d stubbed" % (r["stem"], r["rec"] - r["equiv"], r["stub"]))
