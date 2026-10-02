@@ -1008,8 +1008,6 @@ class Fn:
                         continue
                     if not self._used_as_vector(b, g0, g1):
                         continue             # a float that reuses a Vector arg's slot
-                    if g1 < self.n and not self._defines_vector(b, g0, g1):
-                        continue             # e.g. a call's Vector return being copied out
                     hit = True
                     for o in (b, b + 4, b + 8):
                         self.forced_local.setdefault(o, []).append((g0, g1))
