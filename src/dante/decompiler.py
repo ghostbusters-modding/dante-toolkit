@@ -3037,17 +3037,31 @@ class Fn:
                 best = j
         return best
 
+    def _do_cond_start(self, head, L):
+        """Where a do/while condition begins: `while (a && b)` tests a before the latch."""
+        best = L
+        for c in range(L - 1, head, -1):
+            if self._produces_stmt(c) and not is_jump(self.ins[c]):
+                break
+            if any(is_jump(self.ins[j]) and c < self.tgt[j] <= L for j in range(head, c)):
+                continue                     # the body jumps into it: not one condition
+            node = self.condT(c, head, L + 1)
+            if node is not None and node[1] == L + 1:
+                best = c
+        return best
+
     def _bareloop(self, head, L, i1, loops, out):
         end = L + 1
         body = []
         self.pending.clear()
-        self.structure(head, L, loops + [(L, end)], body)
+        C = L if is_goto(self.ins[L]) else self._do_cond_start(head, L)
+        self.structure(head, C, loops + [(C, end)], body)
         # the body's trailing temporaries feed the latch condition -- do not drop them
         if is_goto(self.ins[L]):
             self.pending.clear()
             out.append(St("for", "", "", "", body))
         else:
-            node = self.condT(L, head, L + 1)
+            node = self.condT(C, head, L + 1)
             if node is None or node[1] != L + 1:
                 raise Bail("do/while condition at %X" % self.ins[L].off)
             setup = []
