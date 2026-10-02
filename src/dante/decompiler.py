@@ -993,8 +993,6 @@ class Fn:
                 self.vec_base.add(b)
                 continue
             blocked = b in self.block_slots or (b + 4) in self.block_slots
-            if blocked and not (narrow & {b, b + 4, b + 8}):
-                continue
             if blocked:
                 # Between two calls that cover it the slot can hold a Vector local
                 # whose lanes are written one at a time.
@@ -1006,10 +1004,7 @@ class Fn:
                 gaps = zip([c + 1 for c in covers], covers[1:] + [self.n])
                 hit = False
                 for g0, g1 in gaps:
-                    if not any(self.ins[i].name in NARROW and
-                               self.ins[i].ops[0].mode == 3 and
-                               s16(self.ins[i].ops[0].words[0]) == b
-                               for i in range(g0, g1)):
+                    if not self._lane_access(b, g0, g1, NARROW):
                         continue
                     if not self._used_as_vector(b, g0, g1):
                         continue             # a float that reuses a Vector arg's slot
@@ -1027,6 +1022,23 @@ class Fn:
                     self.forced_local.setdefault(o, []).append((0, self.n))
             else:
                 self.vec_base.add(b)
+
+    def _lane_access(self, b, i0, i1, narrow):
+        """Is a lane of `b` written as a float, or read on its own, in [i0, i1)?"""
+        for i in range(i0, i1):
+            ins = self.ins[i]
+            for idx in range(3):
+                o = ins.ops[idx]
+                if o.mode != 3 or s16(o.words[0]) not in (b, b + 4, b + 8):
+                    continue
+                if idx == 0 and OPS[ins.op][1] == "d":
+                    if ins.name in narrow and s16(o.words[0]) == b:
+                        return True
+                elif ins.name not in ("MOVV", "ADDV", "SUBV", "DOT", "VTOS", "LEA") and \
+                        not (ins.name in ("MULVS", "DIVVS") and idx == 1) and \
+                        not ins.name.endswith("_V"):
+                    return True
+        return False
 
     def _defines_vector(self, b, i0, i1):
         """Is `b` written as a whole Vector in [i0, i1), other than to fill a call?"""
