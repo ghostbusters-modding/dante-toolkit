@@ -1762,19 +1762,19 @@ class Compiler:
         return self.gen_expr(f, e, want=(T_INT if fam == "int" else want))
 
     def cmp_operands(self, f, e, op):
-        ln, rn = (e.r, e.l) if op in (">", ">=") else (e.l, e.r)
+        # operands evaluate left to right; only the emitted instruction swaps them
         op2 = {">": "<", ">=": "<="}.get(op, op)
-        lt, rt = self.static_type(f, ln), self.static_type(f, rn)
+        lt, rt = self.static_type(f, e.l), self.static_type(f, e.r)
         fam = "float" if "float" in (lt, rt) else None
-        l = self.gen_num(f, ln, fam) if fam else self.gen_expr(f, ln, want=None)
-        r = self.gen_num(f, rn, fam) if fam else self.gen_expr(f, rn, want=self.hint(l))
+        l = self.gen_num(f, e.l, fam) if fam else self.gen_expr(f, e.l, want=None)
+        r = self.gen_num(f, e.r, fam) if fam else self.gen_expr(f, e.r, want=self.hint(l))
         if l.type.kind == "float" and r.type.kind == "int":
             r = self.coerce(f, r, T_FLOAT)
         if r.type.kind == "float" and l.type.kind == "int":
             l = self.coerce(f, l, T_FLOAT)
         l = self.as_ref(f, l, r.type)
         r = self.as_ref(f, r, l.type)
-        return l, r, op2
+        return (r, l, op2) if op in (">", ">=") else (l, r, op2)
 
     def hint(self, place):
         return place.type
