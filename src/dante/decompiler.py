@@ -42,6 +42,9 @@ class Ex:
         return "Ex(%s)" % self.s
 
 
+MIRROR = {"<": ">", ">": "<", "<=": ">=", ">=": "<=", "==": "==", "!=": "!="}
+
+
 def binop(a, op, b, p, t=None):
     return Ex("%s %s %s" % (a.txt(p), op, b.txt(p + 1)), p, t)
 
@@ -2433,6 +2436,14 @@ class Fn:
         op = (CMP_FALSE if negate else CMP_TRUE)[fam]
         want = self.types.parse(JCMP_TYPE.get(nm, "int"))
         self.cur = br
+        if ins.ops[1].mode == 3 and ins.ops[2].mode == 3:
+            order = list(self.pending)
+            sa, sb = s16(ins.ops[1].words[0]), s16(ins.ops[2].words[0])
+            if sa in order and sb in order and order.index(sb) < order.index(sa):
+                # the right side was computed first: keep that order in the source
+                b = self.operand(ins, 2, want)
+                a = self.operand(ins, 1, b.t or want)
+                return binop(b, MIRROR[op], a, P_EQ if op in ("==", "!=") else P_REL, DC.T_BOOL)
         a = self.operand(ins, 1, want)
         b = self.operand(ins, 2, a.t or want)
         if suf == "B" and ins.ops[2].mode == 0 and fam in ("JEQ", "JNE"):
