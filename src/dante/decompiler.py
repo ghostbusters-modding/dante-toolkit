@@ -1001,7 +1001,7 @@ class Fn:
                     continue                 # a struct local, not a Vector
                 covers = sorted(c for c, cc in self.call.items()
                                 if cc[2] >= 0 and cc[2] < b + 12 and b < cc[3])
-                gaps = zip([c + 1 for c in covers], covers[1:] + [self.n])
+                gaps = zip([0] + [c + 1 for c in covers], covers + [self.n])
                 hit = False
                 for g0, g1 in gaps:
                     if not self._lane_access(b, g0, g1, NARROW):
