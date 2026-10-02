@@ -258,6 +258,19 @@ class Types:
         return self.members.get((stype, name))
 
 
+def check_arg(v, t, i, p, node):
+    """Refuse an argument whose shape cannot fit the parameter: a Vector for a float
+    would silently pass its x lane."""
+    vk = v.type.kind if v.type is not None else None
+    if vk is None:
+        return
+    ok = {"Vector": vk == "Vector", "String": vk == "String"}.get(
+        t.kind, vk not in ("Vector", "String") and
+        (vk not in ("struct", "cls") or t.kind in ("ptr", "obj")))
+    if not ok:
+        err("argument %d of %s: %s given, %s expected" % (i + 1, p.text, v.type.txt, t.txt), node)
+
+
 class SymbolDB:
     """The native, enum and script-function tables a module compiles against.
 
@@ -2045,17 +2058,20 @@ class Compiler:
                 cleanup.append(dst)
                 dst.defer = cleanup
                 v = self.gen_expr(f, a, want=T_STRING, dest=direct)
+                check_arg(v, t, i, p, a)
                 if v is not dst:
                     f.emit("STRCPY", dst, v)
                     self.release(f, v, dst)
                     self.consume(f, v)
             elif t.kind == "Vector":
                 v = self.gen_expr(f, a, want=T_VEC, dest=direct)
+                check_arg(v, t, i, p, a)
                 if v is not dst:
                     f.emit("MOVV", dst, v)
                     self.consume(f, v)
             else:
                 v = self.gen_expr(f, a, want=t, dest=direct)
+                check_arg(v, t, i, p, a)
                 if v is dst:
                     continue
                 if t.kind in ("ptr", "obj") and v.type.kind in ("struct", "cls"):
@@ -2115,17 +2131,24 @@ class Compiler:
         off = 0
         for i, t in enumerate(p.params):
             dst = Place(t, 7, (stack & 0xFFFF, off & 0xFFFF))
+            a = call.args[i]
             if t.kind == "Vector":
-                f.emit("MOVV", dst, self.gen_expr(f, call.args[i], want=T_VEC))
+                v = self.gen_expr(f, a, want=T_VEC)
+                check_arg(v, t, i, p, a)
+                f.emit("MOVV", dst, v)
             elif t.kind == "String":
                 f.emit("STRNEW", dst, sl(h, T_INT))      # created on the new thread's stack
-                f.emit("STRCPY", dst, self.gen_expr(f, call.args[i], want=T_STRING))
+                v = self.gen_expr(f, a, want=T_STRING)
+                check_arg(v, t, i, p, a)
+                f.emit("STRCPY", dst, v)
             elif t.kind in ("ptr", "obj"):
-                v = self.gen_expr(f, call.args[i], want=None)
+                v = self.gen_expr(f, a, want=None)
+                check_arg(v, t, i, p, a)
                 f.emit("LEA" if v.type.kind in ("struct", "cls") else "MOV", dst, v)
             else:
-                v = self.gen_expr(f, call.args[i], want=t)
-                f.emit("MOV", dst, self.coerce(f, v, t, call.args[i]))
+                v = self.gen_expr(f, a, want=t)
+                check_arg(v, t, i, p, a)
+                f.emit("MOV", dst, self.coerce(f, v, t, a))
             off += t.size
         return sl(h, T_INT)          # the thread id (`int h = thread f(...);`)
 
