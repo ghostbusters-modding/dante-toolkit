@@ -1303,6 +1303,9 @@ class Fn:
             if w is not None and prio > self._webprio.get((slot, w), -1):
                 self._webtype[(slot, w)] = t
                 self._webprio[(slot, w)] = prio
+        if t.kind in ("int", "float", "bool", "enum", "obj", "ptr", "func", "String") and \
+                prio > self._nonvec.get(slot, (None, -1))[1]:
+            self._nonvec[slot] = (t, prio)
         old = self.slot_type.get(slot)
         oldp = self._tprio.get(slot, -1)
         if old is None or prio > oldp:
@@ -1312,6 +1315,7 @@ class Fn:
     def _infer_types(self):
         """Type the slots that behave as locals; a temporary's type says nothing."""
         self._tprio = {}
+        self._nonvec = {}              # slot -> best scalar/reference (Type, prio)
         self._webtype = {}
         self._webprio = {}
         for sl in list(self.slot_type):
@@ -1482,7 +1486,11 @@ class Fn:
         self._vector_locals()
         for sl, t in list(self.slot_type.items()):
             if t is not None and t.kind == "Vector" and sl not in self.vec_base:
-                del self.slot_type[sl]
+                if sl in self._nonvec and not self._defines_vector(sl, 0, self.n):
+                    # only read as a Vector (a return copied out): keep what else it held
+                    self.slot_type[sl], self._tprio[sl] = self._nonvec[sl]
+                else:
+                    del self.slot_type[sl]
 
     # ------------------------------------------------------------- rendering
     def type_of(self, slot):
