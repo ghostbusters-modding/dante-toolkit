@@ -3437,7 +3437,11 @@ class Fn:
         then_out = []
         if F - 1 >= j and is_goto(self.ins[F - 1]):
             E = self.tgt[F - 1]
-            is_ctl = (E == self.epi) or any(E in lp for lp in loops)
+            # a jump to the epilogue that is also this region's end closes an else,
+            # unless an empty branch, cleanup or a return value shows it was a `return`
+            ret = E == self.epi and (E != i1 or self.ret_slot is not None or F - 1 == j or
+                                     self.ins[F - 2].name in ("DTORPOP", "STRFREE"))
+            is_ctl = ret or any(E in lp for lp in loops)
             if not is_ctl and F < E <= i1:
                 self.structure(j, F - 1, loops, then_out)
                 self.pending.clear()
