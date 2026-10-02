@@ -1288,7 +1288,9 @@ class Fn:
             selfptr = (nx.name == "LEA" and nx.ops[0].mode == 3 and nx.ops[1].mode == 3 and
                        s16(nx.ops[0].words[0]) == s16(nx.ops[1].words[0]) == slot)
             if slot in uu and not selfptr:
-                uses += 1                    # `LEA d, d` takes an address, not a value
+                # `LEA d, d` takes an address, not a value; `x * x` reads twice
+                uses += max(1, sum(1 for k in (1, 2) if nx.ops[k].mode == 3 and
+                                   s16(nx.ops[k].words[0]) == slot))
             if slot in dd:
                 redefined = True
                 break
