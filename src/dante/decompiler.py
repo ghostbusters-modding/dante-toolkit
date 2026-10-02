@@ -1265,6 +1265,24 @@ class Fn:
             return False
         return seen > 0
 
+    def _dead_lane(self, i, slot):
+        """Is this lane write overwritten before its Vector is read whole?  Then it was a
+        temporary that landed on the lane."""
+        b = next((slot - k for k in (0, 4, 8) if slot - k in self.vec_base), None)
+        if b is None or self.ins[i].name in ("MOVV", "ADDV", "SUBV", "MULVS", "DIVVS"):
+            return False
+        e = self.blocks[self.blk_of[i]][1]
+        for j in range(i + 1, e):
+            nx = self.ins[j]
+            wide = nx.name in ("MOVV", "ADDV", "SUBV", "DOT", "VTOS", "MULVS", "DIVVS") or \
+                nx.name.endswith("_V")
+            if wide and any(nx.ops[k].mode == 3 and s16(nx.ops[k].words[0]) == b
+                            for k in (1, 2)):
+                return False
+            if slot in self.du[j][0]:
+                return wide and nx.ops[0].mode == 3 and s16(nx.ops[0].words[0]) == b
+        return False
+
     def _string_this(self, i, slot):
         """A String copied into `slot` only to be the `this` of one method call, then
         freed: `s.f().length()` keeps the returned String in a temporary."""
@@ -1325,7 +1343,8 @@ class Fn:
     def classify(self, i, slot):
         """'dead' | 'temp' | 'local' for the definition of `slot` at index i."""
         if slot < 8 or (any(a <= i < e for a, e in self.forced_local.get(slot, ())) and
-                        not self._fills_block(i, slot) and not self._ptr_only(i, slot)) or \
+                        not self._fills_block(i, slot) and not self._ptr_only(i, slot) and
+                        not self._dead_lane(i, slot)) or \
                 any(s <= i < e for s, e in self.struct_ranges.get(slot, ())):
             return "local"
         # R1: a plain copy into a slot that isn't filling a call block defines a local.
