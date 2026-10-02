@@ -2011,6 +2011,8 @@ class Fn:
                                 want = mem[1]
             if want is None and ins.ops[0].mode == 7 and ins.ops[0].fix16:
                 want = self.types.parse(ins.ops[0].fix16[0][1].partition(" ")[0])
+            if want is None and ins.ops[0].mode == 7:
+                want = self.operand(ins, 0).t    # a member found by offset through a typed pointer
             if want is None and self.ret_slot is not None and ins.ops[0].mode == 3 and \
                     s16(ins.ops[0].words[0]) == self.ret_slot:
                 want = self.proto.ret
