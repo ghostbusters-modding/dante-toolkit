@@ -2204,7 +2204,7 @@ class Fn:
                 self.skip.add(j)             # a String argument is created in place
                 j += 1
                 continue
-            if nx.name not in ("MOV", "MOVV", "STRCPY", "LEA") or nx.ops[0].mode != 7 or \
+            if nx.name not in ("MOV", "MOVV", "STRCPY", "LEA", "DYNCAST") or nx.ops[0].mode != 7 or \
                s16(nx.ops[0].words[0]) != stack:
                 # an argument expression may need a call of its own; let the linear
                 # decoder run it (its result lands in `pending`)
@@ -2227,7 +2227,14 @@ class Fn:
                     wt = t
                     break
                 cur2 += t.size
-            args[off] = self.operand(nx, 1, wt)
+            if nx.name == "DYNCAST":
+                cn = DV.class_table().get(nx.ops[2].value() & 0xFFFFFFFF)
+                if cn is None:
+                    raise Bail("unknown DYNCAST class id %d" % nx.ops[2].value())
+                a = self.operand(nx, 1)
+                args[off] = Ex("(@%s) %s" % (cn, a.txt(P_UN)), P_UN, self.types.parse("@" + cn))
+            else:
+                args[off] = self.operand(nx, 1, wt)
             self.skip.add(j)
             got += 4
             j += 1
