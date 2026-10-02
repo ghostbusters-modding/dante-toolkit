@@ -2340,12 +2340,16 @@ class Fn:
                 break
         return None if last is None else self.tgt[last]
 
+    def _outside_target(self, j, i):
+        """Is j jumped to from outside [i, j)?  A target inside the condition is part of it."""
+        return j in self.targets and any(t == j and not i <= k < j for k, t in enumerate(self.tgt))
+
     def condF(self, i, F, limit):
         r = self.unitF(i, F, limit)
         if r is None:
             return None
         node, j = r
-        while j < limit and j not in self.targets:
+        while j < limit and not self._outside_target(j, i):
             r2 = self.unitF(j, F, limit)
             if r2 is None:
                 break
@@ -2379,7 +2383,7 @@ class Fn:
         if r is None:
             return None
         node, j = r
-        while j < limit and j not in self.targets:
+        while j < limit and not self._outside_target(j, i):
             r2 = self.unitT(j, T, limit)
             if r2 is None:
                 break
