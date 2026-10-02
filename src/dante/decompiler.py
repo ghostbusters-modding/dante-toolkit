@@ -1036,7 +1036,7 @@ class Fn:
                 if o.mode != 3 or s16(o.words[0]) not in (b, b + 4, b + 8):
                     continue
                 if idx == 0 and OPS[ins.op][1] == "d":
-                    if ins.name in narrow and s16(o.words[0]) == b:
+                    if ins.name in narrow:
                         return True
                 elif ins.name not in ("MOVV", "ADDV", "SUBV", "DOT", "VTOS", "LEA") and \
                         not (ins.name in ("MULVS", "DIVVS") and idx == 1) and \
