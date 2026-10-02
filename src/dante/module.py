@@ -1253,6 +1253,216 @@ def compare_modules(a, b, verbose=False):
     return same, diff, missing
 
 
+_WIDE_DEST = ("MOVV", "ADDV", "SUBV", "MULVS", "DIVVS")
+_WIDE_SRC = ("MOVV", "ADDV", "SUBV", "DOT", "VTOS", "JEQ_V", "JNE_V", "EQ_V", "NE_V")
+_INTO_STRING = ("STRCPY", "STRCAT", "ITOS", "FTOS", "BTOS", "VTOS")  # write into a STRNEW'd String
+
+
+def _ret_size(sym):
+    t = sym.split(" ", 1)[0]
+    if t == "void":
+        return 0
+    if t == "Vector":
+        return 12
+    if t in ("int", "float", "bool", "String") or t.startswith(("@", "E")):
+        return 4
+    return None
+
+
+def _slot_width(ins, idx):
+    if idx == 0 and OPS[ins.op][1] == "d":
+        return 12 if ins.name in _WIDE_DEST else 8 if ins.name == "THREAD" else 4
+    if ins.name in _WIDE_SRC or (ins.name in ("MULVS", "DIVVS") and idx == 1):
+        return 12
+    return 4
+
+
+def _blocks(body):
+    """Basic-block starts and successor lists; TRY handlers are entered from nowhere."""
+    at = {ins.off: i for i, ins in enumerate(body)}
+    starts = {0}
+    tgt = {}
+    for i, ins in enumerate(body):
+        if OPS[ins.op][1] == "j" and ins.name not in ("TRY", "ENDTRY"):
+            t = at.get(ins.off + s16(ins.ops[0].words[0]))
+            if t is None:
+                return None
+            tgt[i] = t
+            starts.add(t)
+            starts.add(i + 1)
+        elif ins.name in ("TRY", "RET"):
+            starts.add(i + 1)
+            if ins.name == "TRY":
+                t = at.get(ins.off + s16(ins.ops[0].words[0]))
+                if t is None:
+                    return None
+                starts.add(t)
+    starts = sorted(x for x in starts if x < len(body))
+    blocks = []
+    for k, st in enumerate(starts):
+        en = starts[k + 1] if k + 1 < len(starts) else len(body)
+        last = body[en - 1]
+        succ = []
+        if en - 1 in tgt:
+            succ.append(tgt[en - 1])
+        a, b = last.ops[1], last.ops[2]
+        goto = last.name == "JEQ_I" and a.mode == b.mode and a.mode not in (3, 7) and a.words == b.words
+        if last.name != "RET" and not goto and en < len(body):
+            succ.append(en)
+        blocks.append((st, en, succ))
+    return blocks
+
+
+def _pinned_size(d, body, lea):
+    """Bytes behind an address-taken slot: the struct a constructor builds there, else a Vector."""
+    i = body.index(lea)
+    nxt = body[i + 1] if i + 1 < len(body) else None
+    if nxt is not None and nxt.name == "CALL" and nxt.ops[0].fix:
+        m = re.search(r" (\w+)::constructor\{", nxt.ops[0].fix[0][1])
+        if m:
+            for k, t, v in d.assumptions:
+                if k == "S" and t == "sizeof(%s)" % m.group(1):
+                    return max(4, v)
+            return 256
+    return 12
+
+
+def equivalent(a, b, proto):
+    """Same behaviour, allowing stack slots to differ?  Tracks which slot pairs hold the
+    same value; conservative, so a False can still be harmless."""
+    x, y = func_body(a, proto), func_body(b, proto)
+    if x is None or y is None or len(x) != len(y):
+        return False
+    static, rstatic = {}, {}               # address-taken slots map one to one
+
+    def bind(m, sa, sb):
+        if m.get(sa, sb) != sb:
+            return False
+        m[sa] = sb
+        return True
+
+    for p, q in zip(x, y):
+        if p.name != q.name:
+            return False
+        for idx, (o, r) in enumerate(zip(p.ops, q.ops)):
+            if o.mode != r.mode:
+                return False
+            if o.mode in (3, 7):
+                if o.words[1:] != r.words[1:] or o.fix16 != r.fix16:
+                    return False
+            elif idx or p.name != "ENTER":
+                if (o.words, o.fix) != (r.words, r.fix) and not (
+                        o.fix and o.fix == r.fix and o.fix[0][1] == a.stem_data):
+                    if not (p.name == "CALL" and idx and o.mode == 2):
+                        return False
+        if p.name == "LEA" and p.ops[1].mode == 3:
+            sa, sb = s16(p.ops[1].words[0]), s16(q.ops[1].words[0])
+            for k in range(0, _pinned_size(a, x, p), 4):
+                if not bind(static, sa + k, sb + k) or not bind(rstatic, sb + k, sa + k):
+                    return False
+    blocks = _blocks(x)
+    if blocks is None or _blocks(y) != blocks:
+        return False
+
+    def ops_of(i):
+        """[(kind, shipped slot, rebuilt slot)] lane by lane; kind is use, def or kill."""
+        p, q = x[i], y[i]
+        out = []
+        if p.name == "CALL":
+            sym = p.ops[0].fix[0][1] if p.ops[0].fix else None
+            ba, bb = p.ops[2].value(), q.ops[2].value()
+            ea, eb = p.ops[1].value(), q.ops[1].value()
+            if ba < 0 or bb < 0:
+                return out if ba == bb else None
+            rs = _ret_size(sym) if sym else None
+            if rs is None or ea - ba != eb - bb:
+                return None
+            for k in range(rs, ea - ba, 4):
+                out.append(("use", ba + k, bb + k))
+            if p.ops[0].fix[0][0] != "N":
+                out.append(("kill", ea, eb))     # a script callee's frame starts past its args
+            for k in range(0, rs, 4):
+                out.append(("def", ba + k, bb + k))
+            return out
+        for idx, (o, r) in enumerate(zip(p.ops, q.ops)):
+            role = OPS[p.op][idx + 1]
+            if o.mode == 7:
+                out.append(("use", s16(o.words[0]), s16(r.words[0])))
+            elif o.mode == 3 and role != "a":
+                kind = "def" if role == "d" and p.name not in ("CTOR", "STRFREE", "DTORPOP") else "use"
+                for k in range(0, _slot_width(p, idx), 4):
+                    if kind == "def" and p.name in _INTO_STRING:
+                        out.append(("use", s16(o.words[0]), s16(r.words[0])))
+                    out.append((kind, s16(o.words[0]) + k, s16(r.words[0]) + k))
+        return sorted(out, key=lambda t: t[0] != "use")
+
+    def step(state, i, check):
+        lanes = ops_of(i)
+        if lanes is None:
+            return None
+        for kind, sa, sb in lanes:
+            if kind == "kill":
+                state = {(u, v) for u, v in state if u < sa and v < sb}
+                continue
+            if sa in static or sb in rstatic:
+                if static.get(sa) != sb or rstatic.get(sb) != sa:
+                    return None
+                continue
+            if kind == "use":
+                if check and (sa, sb) not in state and not (sa < 0 and sa == sb):
+                    return None
+            else:
+                state = {(u, v) for u, v in state if u != sa and v != sb}
+                state.add((sa, sb))
+        return state
+
+    bid = {st: k for k, (st, en, succ) in enumerate(blocks)}
+    at = {ins.off: i for i, ins in enumerate(x)}
+    tries = [(i, at[ins.off + s16(ins.ops[0].words[0])]) for i, ins in enumerate(x)
+             if ins.name == "TRY"]
+    ins_ = [None] * len(blocks)
+    ins_[0] = set()
+
+    def to_handler(i, state):
+        changed = False
+        for t0, h in tries:
+            if t0 <= i < h:
+                j = bid[h]
+                new = state if ins_[j] is None else ins_[j] & state
+                if new != ins_[j]:
+                    ins_[j] = new
+                    changed = True
+        return changed
+    for _ in range(len(blocks) * 4 + 8):
+        changed = False
+        for k, (st, en, succ) in enumerate(blocks):
+            if ins_[k] is None:
+                continue
+            state = set(ins_[k])
+            for i in range(st, en):
+                changed |= to_handler(i, state)
+                state = step(state, i, False)
+                if state is None:
+                    return False
+            for t in succ:
+                j = bid[t]
+                new = state if ins_[j] is None else ins_[j] & state
+                if new != ins_[j]:
+                    ins_[j] = new
+                    changed = True
+        if not changed:
+            break
+    else:
+        return False
+    for k, (st, en, succ) in enumerate(blocks):
+        state = set(ins_[k]) if ins_[k] is not None else set()
+        for i in range(st, en):
+            state = step(state, i, True)
+            if state is None:
+                return False
+    return True
+
+
 def cmd_compare(args):
     a = load(args.a)
     b = load(args.b)
