@@ -169,3 +169,28 @@ def test_mod_corpus_round_trip(request, report):
     for r in rows:
         if r["stub"] or r["rec"] - r["equiv"]:
             report("  %-20s %3d not proven  %3d stubbed" % (r["stem"], r["rec"] - r["equiv"], r["stub"]))
+
+
+def test_decompile_is_stable(corpus_modules, decompiled, report):
+    """Decompiling the rebuild should give back the same source: report how often not."""
+    unstable = 0
+    total = 0
+    for stem in corpus_modules:
+        m, _shipped = decompiled(stem)
+        with tempfile.TemporaryDirectory() as td:
+            built, stubbed = build(m, td)
+            if built is None:
+                continue
+            path = os.path.join(td, "rebuilt.dante")
+            with open(path, "w", newline="\n") as fh:
+                fh.write(built.emit())
+            again = {r.proto: r for r in DD.decompile_file(path).results}
+        for r in m.results:
+            if not r.ok or r.proto in stubbed:
+                continue
+            total += 1
+            r2 = again.get(r.proto)
+            if r2 is None or not r2.ok or DD.render(r.stmts) != DD.render(r2.stmts):
+                unstable += 1
+    report("decompile -> compile -> decompile: %d of %d functions read back differently"
+           % (unstable, total))
