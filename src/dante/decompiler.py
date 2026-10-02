@@ -1920,7 +1920,10 @@ class Fn:
             elif w is not None and w.kind in ("obj", "cls"):
                 w = self.types.parse(w.txt.lstrip("@"))
             val = self.operand(ins, 1, w)
-            val = Ex(val.s, val.p, val.t, lea=True)
+            t = val.t
+            if t is not None and t.kind == "cls":
+                t = self.types.parse("@" + t.txt)    # a class global's address is a reference
+            val = Ex(val.s, val.p, t, lea=True)
             self.store(ins, val, out)
             return
         if nm == "STRNEW":
