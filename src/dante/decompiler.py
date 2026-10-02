@@ -2076,6 +2076,9 @@ class Fn:
                 args.append(self.var_ref(o))
         self._flush(out)
         astr = ", ".join(a.txt(0) for a in args)
+        if recv is not None and native and p.cls and not self._binds_to(recv.t, p):
+            recv = Ex("((@%s) %s)" % (p.cls, recv.txt(P_ATOM)), P_ATOM,
+                      self.types.parse("@" + p.cls))
         if recv is not None:
             s = "%s.%s(%s)" % (recv.txt(P_ATOM), p.name, astr)
         elif p.cls and native:
@@ -2119,6 +2122,36 @@ class Fn:
         # a real local receives it
         self.cur = i
         self._emit_store(retoff, e, out, p.ret.size)
+
+    def _binds_to(self, rt, p):
+        """Would the compiler bind `recv.name(...)` to native `p`?  It has no class
+        hierarchy, so mirror its resolve_call() and cast when the answer is no."""
+        if self.types.parse(p.cls).kind not in ("obj", "cls"):
+            return True                      # String/Vector/struct methods are never cast
+        cls = None
+        if rt is not None:
+            if rt.kind in ("obj", "ptr", "cls"):
+                cls = rt.inner
+            elif rt.kind in ("struct", "opaque", "String", "Vector"):
+                return True                  # never cast a value type
+        n = len(p.params)
+        db = self.m.db
+        if cls:
+            same = [q for q in db.by_name.get((cls, p.name), []) if len(q.params) == n]
+            if same:
+                return same[0].text == p.text
+        declared = set() if any(q.text == p.text for q in db.by_name.get((p.cls, p.name), ())) \
+            else {p.text}
+        best = None
+        cands = [q for (c, nm), qs in db.by_name.items() if nm == p.name and c is not None
+                 for q in qs] + ([p] if declared else [])
+        for q in cands:
+            if len(q.params) != n:
+                continue
+            score = (q.text in declared, bool(cls) and (q.cls.startswith(cls) or cls.startswith(q.cls)))
+            if best is None or score > best[0]:
+                best = (score, q)
+        return best is None or best[1].text == p.text
 
     def _thread(self, i, out):
         ins = self.ins[i]
