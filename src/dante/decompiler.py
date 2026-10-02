@@ -1264,7 +1264,7 @@ class Fn:
     def classify(self, i, slot):
         """'dead' | 'temp' | 'local' for the definition of `slot` at index i."""
         if slot < 8 or (any(a <= i < e for a, e in self.forced_local.get(slot, ())) and
-                        not self._fills_block(i, slot)) or \
+                        not self._fills_block(i, slot) and not self._ptr_only(i, slot)) or \
                 any(s <= i < e for s, e in self.struct_ranges.get(slot, ())):
             return "local"
         # R1: a plain copy into a slot that isn't filling a call block defines a local.
