@@ -1320,6 +1320,9 @@ class Fn:
                 not self._ptr_only(i, slot) and not self._string_this(i, slot):
             return "local"
         if ins.ops[0].mode == 3 and s16(ins.ops[0].words[0]) == slot and \
+                i not in self.call and self._ahead_of_siblings(i, slot):
+            return "local"
+        if ins.ops[0].mode == 3 and s16(ins.ops[0].words[0]) == slot and \
                 self._fills_block(i, slot):
             return "temp"
         k = self.blk_of[i]
@@ -1341,8 +1344,6 @@ class Fn:
         live = (slot in self.live_out[k]) and not redefined
         if uses == 0 and not live:
             return "dead"
-        if uses == 1 and not live and i not in self.call and self._ahead_of_siblings(i, slot):
-            return "local"
         if uses == 1 and not live:
             # A call result stored below the temp region is a named local: temporaries
             # always start at locals_end.
