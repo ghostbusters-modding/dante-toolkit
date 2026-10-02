@@ -2654,8 +2654,41 @@ class Fn:
                     out.append(cid)
                     cid = conts[cid][1]
                 return out
-            if not self._split_once(stmts, conts, text, anc):
+            if not self._split_once(stmts, conts, text, anc) and not self._split_branches(stmts):
                 return
+
+    def _split_branches(self, stmts):
+        """A local declared in a then-branch and assigned first in the else-branch, and
+        used nowhere else, is two variables."""
+        allst = list(walk_stmts(stmts))
+        for x in allst:
+            if x.kind != "if" or not x.b or not x.c:
+                continue
+            inner = {id(y) for y in walk_stmts(x.b)} | {id(y) for y in walk_stmts(x.c)}
+            for d in walk_stmts(x.b):
+                if d.decl is None or d.slot is None:
+                    continue
+                name = d.decl[1]
+                rx = re.compile(r"\b%s\b" % re.escape(name))
+                if any(id(y) not in inner and rx.search(strip_strings(_st_own_text(y)))
+                       for y in allst):
+                    continue
+                els = list(walk_stmts(x.c))
+                first = next((y for y in els if rx.search(strip_strings(_st_own_text(y)))), None)
+                if first is None or first.kind != "raw" or \
+                        not re.match(r"^%s = [^;]*;$" % re.escape(name), first.a.strip()):
+                    continue
+                tname = d.decl[0]
+                new = self._mkname(self.slot_type.get(d.slot), "v%X" % (d.slot & 0xFFFF))
+                rhs = first.a.strip()[len(name) + 3:-1]
+                first.a = "%s %s = %s;" % (tname, new, rhs)
+                first.decl = (tname, new, rhs)
+                first.slot, first.size = d.slot, d.size
+                for y in els:
+                    if y is not first:
+                        rename_stmt(y, name, new)
+                return True
+        return False
 
     def _split_once(self, stmts, conts, text, anc):
         for cid, c in enumerate(conts):
