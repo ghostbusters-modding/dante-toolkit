@@ -2142,9 +2142,11 @@ class Compiler:
                 check_arg(v, t, i, p, a)
                 f.emit("STRCPY", dst, v)
             elif t.kind in ("ptr", "obj"):
-                v = self.gen_expr(f, a, want=None)
+                # a cast lands straight on the new thread's stack
+                v = self.gen_expr(f, a, want=None, dest=dst if a.kind == "cast" else None)
                 check_arg(v, t, i, p, a)
-                f.emit("LEA" if v.type.kind in ("struct", "cls") else "MOV", dst, v)
+                if v is not dst:
+                    f.emit("LEA" if v.type.kind in ("struct", "cls") else "MOV", dst, v)
             else:
                 v = self.gen_expr(f, a, want=t)
                 check_arg(v, t, i, p, a)
