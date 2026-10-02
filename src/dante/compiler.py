@@ -1195,6 +1195,10 @@ class Compiler:
         return (proto, f)
 
     def gen_func(self, proto, d):
+        for t in proto.params:
+            if t.kind in ("cls", "struct"):
+                # only the first word would be copied; nothing shipped passes one by value
+                err("%s: a %s parameter must be a reference (@%s)" % (d.name, t.txt, t.txt), d)
         f = FuncGen(self, proto, d.params, d.name)
         mark = (0, 8)
         self.gen_stmt(f, d.body)
