@@ -42,6 +42,9 @@ class Ex:
         return "Ex(%s)" % self.s
 
 
+# results the compiler writes straight into an argument slot when inlined
+FORWARDED = {"ADDI", "ADDF", "ADDV", "SUBI", "SUBF", "SUBV", "MULI", "MULF", "MULVS",
+             "DIVI", "DIVF", "DIVVS", "MODI", "MODF", "STRCAT", "DYNCAST", "DOT"}
 MIRROR = {"<": ">", ">": "<", "<=": ">=", ">=": "<=", "==": "==", "!=": "!="}
 
 
@@ -1286,6 +1289,20 @@ class Fn:
         free = self.ins[c + 1]
         return free.name == "STRFREE" and free.ops[0].mode == 3 and s16(free.ops[0].words[0]) == slot
 
+    def _copied_to_arg(self, i, slot):
+        """Is a forwardable result copied into an argument instead?  Then it was named."""
+        ins = self.ins[i]
+        if ins.name not in FORWARDED and ins.name[:3] not in ("LT_", "LE_", "EQ_", "NE_"):
+            return False
+        e = self.blocks[self.blk_of[i]][1]
+        u = next((j for j in range(i + 1, e) if slot in self.du[j][1]), None)
+        if u is None:
+            return False
+        nx = self.ins[u]
+        return nx.name in ("MOV", "MOVV", "STRCPY") and nx.ops[0].mode == 3 and \
+            nx.ops[1].mode == 3 and s16(nx.ops[1].words[0]) == slot and \
+            self._fills_block(u, s16(nx.ops[0].words[0]))
+
     def _ahead_of_siblings(self, i, slot):
         """Would inlining the value defined at i reorder calls?  Then the source named it:
         a statement runs in between, or its call's receiver was filled after it."""
@@ -1344,6 +1361,8 @@ class Fn:
         live = (slot in self.live_out[k]) and not redefined
         if uses == 0 and not live:
             return "dead"
+        if uses == 1 and not live and self._copied_to_arg(i, slot):
+            return "local"
         if uses == 1 and not live:
             # A call result stored below the temp region is a named local: temporaries
             # always start at locals_end.
