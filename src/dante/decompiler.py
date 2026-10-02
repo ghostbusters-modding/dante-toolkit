@@ -1287,11 +1287,15 @@ class Fn:
         return free.name == "STRFREE" and free.ops[0].mode == 3 and s16(free.ops[0].words[0]) == slot
 
     def _ahead_of_siblings(self, i, slot):
-        """Is the value at i passed to a call whose receiver or an earlier argument was
-        filled after it?  Inlining it would reorder the source, so it was a local."""
+        """Would inlining the value defined at i reorder calls?  Then the source named it:
+        a statement runs in between, or its call's receiver was filled after it."""
         e = self.blocks[self.blk_of[i]][1]
         u = next((j for j in range(i + 1, e) if slot in self.du[j][1]), None)
-        if u is None or self.ins[u].ops[0].mode != 3 or self.ins[u].name not in ("MOV", "MOVV", "STRCPY"):
+        if u is None:
+            return False
+        if any(j in self.call and self.call[j][4] is None for j in range(i + 1, u)):
+            return True                      # a void call in between is a statement of its own
+        if self.ins[u].ops[0].mode != 3 or self.ins[u].name not in ("MOV", "MOVV", "STRCPY"):
             return False
         d = s16(self.ins[u].ops[0].words[0])
         c = next((j for j in range(u + 1, e) if j in self.call and
