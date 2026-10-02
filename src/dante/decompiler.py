@@ -2263,6 +2263,12 @@ class Fn:
                 self.skip.add(j)
                 self._emit_store(dst, expr, out, 4)
                 return
+        if nx is not None and nx.name == "MOV" and nx.ops[0].mode in (5, 7) and \
+                nx.ops[1].mode == 3 and s16(nx.ops[1].words[0]) == h and j not in self.skip:
+            self.cur = j
+            self.skip.add(j)
+            out.append(St("raw", "%s = %s;" % (self.operand(nx, 0).txt(P_ATOM), expr.txt(0))))
+            return
         out.append(St("raw", "%s;" % expr.txt(0)))
 
     # ------------------------------------------------------- condition trees
