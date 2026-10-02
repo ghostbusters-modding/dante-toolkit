@@ -1262,6 +1262,30 @@ class Fn:
             return False
         return seen > 0
 
+    def _string_this(self, i, slot):
+        """A String copied into `slot` only to be the `this` of one method call, then
+        freed: `s.f().length()` keeps the returned String in a temporary."""
+        if self.ins[i].name != "STRCPY":
+            return False
+        e = self.blocks[self.blk_of[i]][1]
+        j = i + 1
+        while j < e and self.ins[j].name == "STRFREE" and self.ins[j].ops[0].mode == 3 and \
+                s16(self.ins[j].ops[0].words[0]) != slot:
+            j += 1
+        lea = self.ins[j] if j < e else None
+        if lea is None or lea.name != "LEA" or lea.ops[1].mode != 3 or \
+                s16(lea.ops[1].words[0]) != slot:
+            return False
+        c = j + 1
+        while c < e and c not in self.call:
+            if slot in self.du[c][0] | self.du[c][1]:
+                return False
+            c += 1
+        if c + 1 >= e or self.call[c][5] != s16(lea.ops[0].words[0]):
+            return False
+        free = self.ins[c + 1]
+        return free.name == "STRFREE" and free.ops[0].mode == 3 and s16(free.ops[0].words[0]) == slot
+
     def classify(self, i, slot):
         """'dead' | 'temp' | 'local' for the definition of `slot` at index i."""
         if slot < 8 or (any(a <= i < e for a, e in self.forced_local.get(slot, ())) and
@@ -1274,7 +1298,7 @@ class Fn:
         if ins.name in ("MOV", "MOVV", "STRCPY") and ins.ops[0].mode == 3 and \
                 s16(ins.ops[0].words[0]) == slot and slot != self.ret_slot and \
                 i not in self.want_of and not self._fills_block(i, slot) and \
-                not self._ptr_only(i, slot):
+                not self._ptr_only(i, slot) and not self._string_this(i, slot):
             return "local"
         if ins.ops[0].mode == 3 and s16(ins.ops[0].words[0]) == slot and \
                 self._fills_block(i, slot):
@@ -1304,7 +1328,8 @@ class Fn:
             ins = self.ins[i]
             if ins.name in ("MOV", "MOVV", "STRCPY") and ins.ops[0].mode == 3 and \
                     ins.ops[1].mode == 3 and slot < self.block_minbase[k] and \
-                    s16(ins.ops[1].words[0]) in self.block_ret[k]:
+                    s16(ins.ops[1].words[0]) in self.block_ret[k] and \
+                    not self._string_this(i, slot):
                 return "local"
             return "temp"
         return "local"
