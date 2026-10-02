@@ -2052,7 +2052,9 @@ class Compiler:
         if is_native and p.this is not None:
             thisoff = offs[idx]
             idx += 1
-            self.gen_this(f, objnode, p, sl(thisoff, p.this))
+            t = self.gen_this(f, objnode, p, sl(thisoff, p.this))
+            if t is not None:
+                cleanup.append(t)
         for i, t in enumerate(p.params):
             dst = sl(offs[idx + i], t)
             a = args[i]
@@ -2105,9 +2107,20 @@ class Compiler:
         return r
 
     def gen_this(self, f, objnode, p, dst):
+        """Fill the `this` slot.  Returns a String temporary to free after the call."""
         if objnode.kind == "cast" and objnode.type.kind in ("obj", "cls"):
             self.gen_expr(f, objnode, want=p.this, dest=dst)     # DYNCAST into the slot
-            return
+            return None
+        if objnode.kind in ("call", "mcall") and self.static_type(f, objnode) == "String":
+            # a returned String is copied into a temporary that outlives the inner call
+            t = sl(f.alloc_temp(4), T_STRING)
+            f.emit("STRNEW", t, imm_int(0))
+            v = self.gen_expr(f, objnode, want=None)
+            f.emit("STRCPY", t, v)
+            self.release(f, v)
+            self.consume(f, v)
+            f.emit("LEA", dst, t)
+            return t
         v = self.gen_expr(f, objnode, want=None)
         # a value object / struct is passed by address; a reference (`@CFoo`) by value
         if v.type.kind in ("struct", "cls", "opaque", "Vector", "String"):
@@ -2115,6 +2128,7 @@ class Compiler:
         else:
             f.emit("MOV", dst, v)
         self.consume(f, v)
+        return None
 
     def gen_thread(self, f, call):
         if call.kind != "call" or call.fn.kind != "id":
