@@ -1313,9 +1313,8 @@ def _blocks(body):
     return blocks
 
 
-def _pinned_size(d, body, lea):
-    """Bytes behind an address-taken slot: the struct a constructor builds there, else a Vector."""
-    i = body.index(lea)
+def _pinned_size(d, body, i):
+    """Bytes of the struct a constructor builds at the slot LEA i takes, else None."""
     nxt = body[i + 1] if i + 1 < len(body) else None
     if nxt is not None and nxt.name == "CALL" and nxt.ops[0].fix:
         m = re.search(r" (\w+)::constructor\{", nxt.ops[0].fix[0][1])
@@ -1324,6 +1323,33 @@ def _pinned_size(d, body, lea):
                 if k == "S" and t == "sizeof(%s)" % m.group(1):
                     return max(4, v)
             return 256
+    return None
+
+
+def _lea_width(body, i):
+    """Bytes behind an address passed as `this` or an argument: a Vector's, else one slot."""
+    dest = s16(body[i].ops[0].words[0]) if body[i].ops[0].mode == 3 else None
+    for j in range(i + 1, len(body)):
+        c = body[j]
+        if c.name != "CALL" or not c.ops[0].fix:
+            continue
+        sym = c.ops[0].fix[0][1]
+        base, end = c.ops[2].value(), c.ops[1].value()
+        if dest is None or not base <= dest < end:
+            return 12
+        m = re.match(r"^(\S+) ([^(]*)\((.*)\)$", sym)
+        if not m:
+            return 12
+        types = [t for t in m.group(3).split(",") if t]
+        cls = re.search(r"\{(@\w+)\}", m.group(2))
+        if cls and c.ops[0].fix[0][0] == "N":
+            types.insert(0, cls.group(1))
+        off = base + (_ret_size(sym) or 0)
+        for t in types:
+            if off == dest:
+                return 12 if t.lstrip("@") == "Vector" else 4
+            off += 12 if t == "Vector" else 4
+        return 12
     return 12
 
 
@@ -1333,14 +1359,6 @@ def equivalent(a, b, proto):
     x, y = func_body(a, proto), func_body(b, proto)
     if x is None or y is None or len(x) != len(y):
         return False
-    static, rstatic = {}, {}               # address-taken slots map one to one
-
-    def bind(m, sa, sb):
-        if m.get(sa, sb) != sb:
-            return False
-        m[sa] = sb
-        return True
-
     for p, q in zip(x, y):
         if p.name != q.name:
             return False
@@ -1355,11 +1373,30 @@ def equivalent(a, b, proto):
                         o.fix and o.fix == r.fix and o.fix[0][1] == a.stem_data):
                     if not (p.name == "CALL" and idx and o.mode == 2):
                         return False
-        if p.name == "LEA" and p.ops[1].mode == 3:
-            sa, sb = s16(p.ops[1].words[0]), s16(q.ops[1].words[0])
-            for k in range(0, _pinned_size(a, x, p), 4):
-                if not bind(static, sa + k, sb + k) or not bind(rstatic, sb + k, sa + k):
-                    return False
+    # a constructed struct stays at one place from its constructor to its last DTORPOP
+    regions = []                           # (first, last, shipped base, rebuilt base, size)
+    for i, p in enumerate(x):
+        size = _pinned_size(a, x, i) if p.name == "LEA" and p.ops[1].mode == 3 else None
+        if size is None:
+            continue
+        sa, sb = s16(p.ops[1].words[0]), s16(y[i].ops[1].words[0])
+        last = len(x) - 1
+        for j in range(i + 1, len(x)):
+            if j != i and x[j].name == "LEA" and x[j].ops[1].mode == 3 and \
+                    s16(x[j].ops[1].words[0]) == sa and _pinned_size(a, x, j):
+                break
+            if x[j].name == "DTORPOP" and s16(x[j].ops[0].words[0]) == sa:
+                last = j
+        regions.append((i, last, sa, sb, size))
+
+    def pinned(i, sa, sb):
+        """None if neither slot is in a live struct, else whether they match within it."""
+        ra = next((r for r in regions if r[0] <= i <= r[1] and r[2] <= sa < r[2] + r[4]), None)
+        rb = next((r for r in regions if r[0] <= i <= r[1] and r[3] <= sb < r[3] + r[4]), None)
+        if ra is None and rb is None:
+            return None
+        return ra is rb and sa - ra[2] == sb - ra[3]
+
     blocks = _blocks(x)
     if blocks is None or _blocks(y) != blocks:
         return False
@@ -1381,6 +1418,8 @@ def equivalent(a, b, proto):
                 out.append(("use", ba + k, bb + k))
             if p.ops[0].fix[0][0] != "N":
                 out.append(("kill", ea, eb))     # a script callee's frame starts past its args
+            if sym.split(" ", 1)[0] == "String":
+                out.append(("use", ba, bb))      # a String result is written into a STRNEW'd slot
             for k in range(0, rs, 4):
                 out.append(("def", ba + k, bb + k))
             return out
@@ -1388,7 +1427,14 @@ def equivalent(a, b, proto):
             role = OPS[p.op][idx + 1]
             if o.mode == 7:
                 out.append(("use", s16(o.words[0]), s16(r.words[0])))
-            elif o.mode == 3 and role != "a":
+            elif o.mode == 3 and role == "a":
+                sa, sb = s16(o.words[0]), s16(r.words[0])
+                if pinned(i, sa, sb) is not None:
+                    out.append(("use", sa, sb))
+                else:
+                    for k in range(0, _lea_width(x, i), 4):   # read through the address
+                        out.append(("use", sa + k, sb + k))
+            elif o.mode == 3:
                 kind = "def" if role == "d" and p.name not in ("CTOR", "STRFREE", "DTORPOP") else "use"
                 for k in range(0, _slot_width(p, idx), 4):
                     if kind == "def" and p.name in _INTO_STRING:
@@ -1404,14 +1450,17 @@ def equivalent(a, b, proto):
             if kind == "kill":
                 state = {(u, v) for u, v in state if u < sa and v < sb}
                 continue
-            if sa in static or sb in rstatic:
-                if static.get(sa) != sb or rstatic.get(sb) != sa:
+            pin = pinned(i, sa, sb)
+            if pin is not None:
+                if not pin:
                     return None
                 continue
             if kind == "use":
-                if check and (sa, sb) not in state and not (sa < 0 and sa == sb):
+                if check and (sa, sb) not in state and not (sa < 8 and sa == sb):
                     return None
             else:
+                if sa != sb and (0 <= sa < 8 or 0 <= sb < 8):
+                    return None                  # a write into the frame header
                 state = {(u, v) for u, v in state if u != sa and v != sb}
                 state.add((sa, sb))
         return state
