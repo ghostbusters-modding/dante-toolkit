@@ -1829,7 +1829,9 @@ class Fn:
             self._web_sync(slot)
             if self.ret_slot is not None and slot == self.ret_slot:
                 return False
-            if slot >= 8 and (slot not in self.declared or self.classify(self.cur, slot) == "temp"):
+            lane = any((slot - k) in self.vec_base and (slot - k) in self.declared for k in (4, 8))
+            if slot >= 8 and ((slot not in self.declared and not lane) or
+                              self.classify(self.cur, slot) == "temp"):
                 return False
             self._flush(out)
             dst = self.var_ref(slot, w)
