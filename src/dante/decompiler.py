@@ -3357,8 +3357,11 @@ class Fn:
             A.a = "%s %s = %s;" % (A.decl[0], A.decl[1], rhs)
             A.decl = (A.decl[0], A.decl[1], rhs)
             return A, E
+        # a ternary computes into a slot first; a store per arm to a global or
+        # member was an if/else
+        slot_dest = all(self.ins[k].ops[0].mode == 3 for k in (F - 2, E - 1))
         if A.decl is None and B.decl is None and " = " in A.a and " = " in B.a and \
-                A.a.split(" = ", 1)[0] == B.a.split(" = ", 1)[0]:
+                slot_dest and A.a.split(" = ", 1)[0] == B.a.split(" = ", 1)[0]:
             A.a = "%s = %s;" % (A.a.split(" = ", 1)[0],
                                 pick % (A.a.split(" = ", 1)[1][:-1],
                                         B.a.split(" = ", 1)[1][:-1]))
