@@ -1337,6 +1337,7 @@ class Fn:
         for s0, e0 in self.blocks:
             cls_of = {}
             tmp_type = {}              # temp slot -> (Type, prio) its value carries
+            tstack = None
             for i in range(s0, e0):
                 ins = self.ins[i]
                 nm = ins.name
@@ -1387,11 +1388,15 @@ class Fn:
                             if mem is not None:
                                 gt = mem[1]
                         use(s16(ins.ops[1].words[0]), gt, 70)
+                if nm == "THREAD" and ins.ops[0].mode == 3:
+                    tstack = s16(ins.ops[0].words[0]) + 4
                 for k in range(3):
                     o = ins.ops[k]
                     if o.mode != 7:
                         continue
                     bslot = s16(o.words[0])
+                    if bslot == tstack:
+                        continue             # the new thread's stack, not a variable
                     if o.fix16:
                         mt, _, rest = o.fix16[0][1].partition(" ")
                         cls = rest.partition("::")[0]
