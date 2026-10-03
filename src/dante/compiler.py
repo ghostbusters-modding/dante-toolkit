@@ -267,6 +267,8 @@ def check_arg(v, t, i, p, node):
     ok = {"Vector": vk == "Vector", "String": vk == "String"}.get(
         t.kind, vk not in ("Vector", "String") and
         (vk not in ("struct", "cls") or t.kind in ("ptr", "obj")))
+    if t.kind == "ptr" and vk not in ("ptr", "obj", "struct", "cls", "func") and v.mode in (3, 5, 7):
+        ok = False                     # an int for an `@int` passes its value, not its address
     if not ok:
         err("argument %d of %s: %s given, %s expected" % (i + 1, p.text, v.type.txt, t.txt), node)
 

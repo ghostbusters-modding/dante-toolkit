@@ -93,6 +93,13 @@ def test_runs_in_the_vm(tiny, proto, args, want):
     assert vm.call(proto, *args) == want
 
 
+def test_int_for_a_pointer_parameter_is_refused(tmp_path):
+    src = tmp_path / "bad.dn"
+    src.write_text(SOURCE.replace("bump(&n);", "bump(n);"), newline="\n")
+    with pytest.raises(dante.CompileError, match="int given, @int expected"):
+        dante.compile_source(str(src))
+
+
 # ------------------------------------------------------------------- symbols
 def test_class_ids_match_the_engine():
     assert dante.classid("CCharacter") == 0x75C2BB57
