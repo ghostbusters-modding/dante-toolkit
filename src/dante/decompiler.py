@@ -2973,8 +2973,11 @@ class Fn:
                 self.step(i, out)
                 if getattr(self, "returned", False):
                     self.returned = False
-                    if i + 1 < i1 and is_goto(self.ins[i + 1]) and self.tgt[i + 1] == self.epi:
-                        i += 1
+                    j = i + 1
+                    while j < i1 and self.ins[j].name in ("STRFREE", "DTORPOP"):
+                        j += 1           # a String return frees its temporary before the jump
+                    if j < i1 and is_goto(self.ins[j]) and self.tgt[j] == self.epi:
+                        i = j
                 i += 1
                 continue
             # -------- unconditional jump
