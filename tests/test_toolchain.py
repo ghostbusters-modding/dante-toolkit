@@ -24,6 +24,19 @@ String greet(String who)
 {
     return "hello " + who;
 }
+
+void bump(@int p)
+{
+    *p += 1;
+}
+
+int bumpTwice()
+{
+    int n = 0;
+    bump(&n);
+    bump(&n);
+    return n;
+}
 """
 
 
@@ -62,7 +75,7 @@ def test_decompiles_and_recompiles_to_the_same_words(tiny, tmp_path):
     src = tmp_path / "again.dn"
     src.write_text(m.source(compilable=True), newline="\n")
     again = dante.compile_source(str(src), module="tiny")
-    for proto in ("int twice(int)", "String greet(String)"):
+    for proto in ("int twice(int)", "String greet(String)", "int bumpTwice()"):
         assert [dante.normalize(built, i) for i in dante.func_body(built, proto)] \
             == [dante.normalize(again, i) for i in dante.func_body(again, proto)]
 
@@ -71,6 +84,7 @@ def test_decompiles_and_recompiles_to_the_same_words(tiny, tmp_path):
     ("int twice(int)", (21,), 42),
     ("int sumTo(int)", (10,), 55),
     ("String greet(String)", ("world",), "hello world"),
+    ("int bumpTwice()", (), 2),
 ])
 def test_runs_in_the_vm(tiny, proto, args, want):
     _, path, _ = tiny

@@ -46,6 +46,7 @@ class Ex:
 FORWARDED = {"ADDI", "ADDF", "ADDV", "SUBI", "SUBF", "SUBV", "MULI", "MULF", "MULVS",
              "DIVI", "DIVF", "DIVVS", "MODI", "MODF", "STRCAT", "DYNCAST", "DOT"}
 MIRROR = {"<": ">", ">": "<", "<=": ">=", ">=": "<=", "==": "==", "!=": "!="}
+SCALAR_KINDS = {"int", "float", "bool", "enum", "ptr", "obj"}
 
 
 def binop(a, op, b, p, t=None):
@@ -2043,6 +2044,10 @@ class Fn:
             t = val.t
             if t is not None and t.kind == "cls":
                 t = self.types.parse("@" + t.txt)    # a class global's address is a reference
+            elif ins.ops[1].mode == 3 and t is not None and t.kind in SCALAR_KINDS:
+                # only value types pass by address implicitly; a scalar local needs `&`
+                val = Ex("&" + val.txt(P_UN), P_UN)
+                t = self.types.parse("@" + t.txt)
             val = Ex(val.s, val.p, t, lea=True)
             self.store(ins, val, out)
             return
